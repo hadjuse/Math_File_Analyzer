@@ -9,9 +9,13 @@ from langchain_mistralai import ChatMistralAI
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 import os
+import chromadb
 from langsmith import Client
 import tempfile
 import pandas as pd
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = __import__('pysqlite3')
 # Début du CSS personnalisé
 st.markdown("""
 <style>
