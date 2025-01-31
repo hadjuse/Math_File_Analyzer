@@ -133,11 +133,11 @@ def process_pdf_text(pdf_path, max_pages=10, chunk_size=1000, chunk_overlap=200)
     return text_splitter.split_documents(pages)
 
 @st.cache_data(show_spinner=False)
-def create_vector_store(texts, model="mistral-embed", persist_directory="./chroma_db"):
+def create_vector_store(_texts, model="mistral-embed", persist_directory="./chroma_db"):
     """Create a vector store from texts using MistralAI embeddings."""
     embeddings = MistralAIEmbeddings(model=model, mistral_api_key=MISTRAL_API_KEY)
     return Chroma.from_documents(
-        documents=texts,
+        documents=_texts,
         embedding=embeddings,
         persist_directory=persist_directory
     )
