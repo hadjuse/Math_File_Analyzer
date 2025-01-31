@@ -126,7 +126,7 @@ def initialize_qa_chain(vector_store):
     llm = ChatMistralAI(
         model="mistral-large-latest",
         mistral_api_key=MISTRAL_API_KEY,
-        temperature=0
+        temperature=0.2
     )
 
     # First prompt: Generate initial answer
