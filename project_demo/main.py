@@ -12,10 +12,11 @@ import os
 from langsmith import Client
 import tempfile
 import pandas as pd
-import chromadb
+
 importlib.import_module('pysqlite3')
 import sys
 sys.modules['sqlite3'] = __import__('pysqlite3')
+import chromadb
 from langchain_community.vectorstores import Chroma
 # Début du CSS personnalisé
 st.markdown("""
