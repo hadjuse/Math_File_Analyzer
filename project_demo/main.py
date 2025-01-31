@@ -22,7 +22,7 @@ import re
 from langchain.chains import LLMChain
 from langchain.prompts import PipelinePromptTemplate
 
-# Début du CSS personnalisé
+# ---------------------- CSS personnalisé ----------------------
 st.markdown("""
 <style>
 /* Style personnalisé pour les équations */
@@ -56,6 +56,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ---------------------- Rendering Functions ----------------------
 def render_markdown_table(content):
     """Render Markdown tables from content."""
     if re.search(r'^(\|.+\|)(\n\|[- :|]+\|)(\n\|.+\|)*$', content.strip(), flags=re.MULTILINE):
@@ -68,7 +69,7 @@ def render_latex(content):
     latex_content = re.sub(r'^\$+|\\[()\[\]]', '', content.strip())
     try:
         st.latex(latex_content)
-    except:
+    except Exception:
         st.code(content)
 
 def render_text(content):
@@ -86,27 +87,32 @@ def render_math(content):
         if render_markdown_table(part):
             continue
         
-        subparts = re.split(r'(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$|\\begin\{.*?\}.*?\\end\{.*?\})', 
-                            part, 
-                            flags=re.DOTALL)
+        subparts = re.split(
+            r'(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$|\\begin\{.*?\}.*?\\end\{.*?\})', 
+            part, 
+            flags=re.DOTALL
+        )
         
         for subpart in subparts:
             if not subpart:
                 continue
             
-            if re.match(r'(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$|\\begin\{.*?\}.*?\\end\{.*?\})', 
-                        subpart, 
-                        flags=re.DOTALL):
+            if re.match(
+                r'(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$|\\begin\{.*?\}.*?\\end\{.*?\})', 
+                subpart, 
+                flags=re.DOTALL
+            ):
                 render_latex(subpart)
             else:
                 render_text(subpart)
 
-# Configuration
+# ---------------------- Configuration ----------------------
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "Math PDF QA with Mistral"
 client = Client()
 MISTRAL_API_KEY = st.secrets["MISTRAL_API_KEY"]
 
+# ---------------------- PDF Processing Functions ----------------------
 def process_pdf_images(pdf_path, max_pages=10, dpi=300):
     """Convert PDF to images and limit to max_pages."""
     images = convert_from_path(pdf_path, dpi=dpi)
@@ -214,30 +220,35 @@ def initialize_qa_chain(vector_store):
         return_source_documents=True
     )
 
-# Initialisation de l'état de session
+def get_pdf_page_count(pdf_path):
+    """Return the number of pages in the PDF using PyMuPDF."""
+    doc = fitz.open(pdf_path)
+    return doc.page_count
+
+# ---------------------- Session State Initialization ----------------------
 if 'qa_chain' not in st.session_state:
     st.session_state.update({
         'qa_chain': None,
         'pdf_images': None
     })
 
-# Interface Streamlit
+# ---------------------- Streamlit Interface ----------------------
 st.title("📚 Analyseur de PDF Mathématiques")
 
 # Section Téléchargement PDF
-with st.container(border=True):
-    uploaded_file = st.file_uploader("Télécharger un PDF", type="pdf")
-
-if not uploaded_file and st.session_state.get('pdf_images'):
-    # Réinitialiser l'état quand le PDF est supprimé
-    st.session_state.qa_chain = None
-    st.session_state.pdf_images = None
-    st.rerun()  # Forcer le rafraîchissement de l'UI
+with st.container():
+    uploaded_file = st.file_uploader("Télécharger un PDF (max 15 pages)", type="pdf")
 
 if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_path = tmp_file.name
+
+    # Check the number of pages before processing
+    page_count = get_pdf_page_count(tmp_path)
+    if page_count > 15:
+        st.error("Le PDF contient {} pages. Veuillez uploader un document de 15 pages maximum.".format(page_count))
+        st.stop()
 
     if not st.session_state.qa_chain:
         with st.spinner("Traitement du PDF en cours..."):
@@ -250,12 +261,12 @@ if uploaded_file:
                 st.error(f"Erreur de traitement : {str(e)}")
 
 # Affichage du PDF
-if st.session_state.pdf_images and uploaded_file:  # Ajout de la condition uploaded_file
-    with st.container(border=True):
+if st.session_state.pdf_images and uploaded_file:
+    with st.container():
         st.subheader("📄 Aperçu du Document")
         
         # Centrage de la navigation
-        cols = st.columns([1, 2, 1])  # Colonnes pour centrage
+        cols = st.columns([1, 2, 1])
         with cols[1]:
             page_number = st.number_input(
                 "Page", 
@@ -266,7 +277,7 @@ if st.session_state.pdf_images and uploaded_file:  # Ajout de la condition uploa
             )
         
         # Centrage de l'image
-        col1, col2, col3 = st.columns([1, 3, 1])  # Ratio pour centrage
+        col1, col2, col3 = st.columns([1, 3, 1])
         with col2:
             st.image(
                 st.session_state.pdf_images[page_number-1],
@@ -275,7 +286,7 @@ if st.session_state.pdf_images and uploaded_file:  # Ajout de la condition uploa
             )
 
 # Section Analyse
-with st.container(border=True):
+with st.container():
     st.subheader("🔍 Analyse du Contenu")
     question = st.text_input("Posez votre question ici :", key="question_input")
     
@@ -293,7 +304,7 @@ with st.container(border=True):
                         source_page = doc.metadata.get('page', 0) + 1
                         content = doc.page_content
                         
-                        with st.container(border=True):
+                        with st.container():
                             st.markdown(f"**Page {source_page}**")
                             render_math(content)
                 
