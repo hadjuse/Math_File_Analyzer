@@ -18,6 +18,10 @@ import pysqlite3
 sys.modules['sqlite3'] = sys.modules["pysqlite3"]
 import chromadb
 from langchain_community.vectorstores import Chroma
+import re
+from langchain.chains import LLMChain
+from langchain.prompts import PipelinePromptTemplate
+
 # Début du CSS personnalisé
 st.markdown("""
 <style>
@@ -51,6 +55,7 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
 def render_markdown_table(content):
     """Render Markdown tables from content."""
     if re.search(r'^(\|.+\|)(\n\|[- :|]+\|)(\n\|.+\|)*$', content.strip(), flags=re.MULTILINE):
@@ -95,38 +100,45 @@ def render_math(content):
                 render_latex(subpart)
             else:
                 render_text(subpart)
+
 # Configuration
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "Math PDF QA with Mistral"
 client = Client()
 MISTRAL_API_KEY = st.secrets["MISTRAL_API_KEY"]
 
-def process_pdf(pdf_path):
-    """Process PDF and return both text content and rendered images"""
-    # Convert PDF to images
-    images = convert_from_path(pdf_path, dpi=300)
-    
-    # Traditional text processing for QA
+def process_pdf_images(pdf_path, max_pages=10, dpi=300):
+    """Convert PDF to images and limit to max_pages."""
+    images = convert_from_path(pdf_path, dpi=dpi)
+    return images[:max_pages]
+
+def process_pdf_text(pdf_path, max_pages=10, chunk_size=1000, chunk_overlap=200):
+    """Extract and split text from PDF, limit to max_pages."""
     loader = PyPDFLoader(pdf_path)
     pages = loader.load_and_split()
-    
+    pages = pages[:max_pages]
+
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap
     )
-    texts = text_splitter.split_documents(pages)
-    
-    embeddings = MistralAIEmbeddings(model="mistral-embed", mistral_api_key=MISTRAL_API_KEY)
-    vector_store = Chroma.from_documents(
+    return text_splitter.split_documents(pages)
+
+def create_vector_store(texts, model="mistral-embed", persist_directory="./chroma_db"):
+    """Create a vector store from texts using MistralAI embeddings."""
+    embeddings = MistralAIEmbeddings(model=model, mistral_api_key=MISTRAL_API_KEY)
+    return Chroma.from_documents(
         documents=texts,
         embedding=embeddings,
-        persist_directory="./chroma_db"
+        persist_directory=persist_directory
     )
-    
-    return vector_store, images
 
-from langchain.chains import LLMChain
-from langchain.prompts import PipelinePromptTemplate
+def process_pdf(pdf_path):
+    """Process PDF and return both text content and rendered images."""
+    images = process_pdf_images(pdf_path)
+    texts = process_pdf_text(pdf_path)
+    vector_store = create_vector_store(texts)
+    return vector_store, images
 
 def initialize_qa_chain(vector_store):
     llm = ChatMistralAI(
@@ -202,17 +214,14 @@ def initialize_qa_chain(vector_store):
         return_source_documents=True
     )
 
-
-# Initialize session state
+# Initialisation de l'état de session
 if 'qa_chain' not in st.session_state:
     st.session_state.update({
         'qa_chain': None,
         'pdf_images': None
     })
 
-
-
-# Streamlit UI
+# Interface Streamlit
 st.title("📚 Analyseur de PDF Mathématiques")
 
 # Section Téléchargement PDF
@@ -223,7 +232,7 @@ if not uploaded_file and st.session_state.get('pdf_images'):
     # Réinitialiser l'état quand le PDF est supprimé
     st.session_state.qa_chain = None
     st.session_state.pdf_images = None
-    st.rerun()  # Forcer le rafraîchissement de l'UI
+    st.experimental_rerun()  # Forcer le rafraîchissement de l'UI
 
 if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
@@ -264,7 +273,7 @@ if st.session_state.pdf_images and uploaded_file:  # Ajout de la condition uploa
                 use_container_width=True,
                 caption=f"Page {page_number}"
             )
-import re
+
 # Section Analyse
 with st.container(border=True):
     st.subheader("🔍 Analyse du Contenu")
@@ -276,20 +285,17 @@ with st.container(border=True):
                 result = st.session_state.qa_chain.invoke({"query": question})
                 answer = result["result"]
 
-                # Modification ici
                 with st.expander("### 📝 Réponse Complète", expanded=True):
-                    render_math(answer)  # Appel à la nouvelle fonction
+                    render_math(answer)
 
-                # Modification ici
                 with st.expander("### 📚 Sources de Référence"):
                     for doc in result["source_documents"]:
-                        source_page = doc.metadata['page'] + 1
+                        source_page = doc.metadata.get('page', 0) + 1
                         content = doc.page_content
                         
                         with st.container(border=True):
                             st.markdown(f"**Page {source_page}**")
-                            render_math(content)  # Appel à la nouvelle fonction
+                            render_math(content)
                 
             except Exception as e:
                 st.error(f"Erreur d'analyse : {str(e)}")
-
