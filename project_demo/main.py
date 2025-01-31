@@ -208,6 +208,12 @@ st.title("📚 Analyseur de PDF Mathématiques")
 with st.container(border=True):
     uploaded_file = st.file_uploader("Télécharger un PDF", type="pdf")
 
+if not uploaded_file and st.session_state.get('pdf_images'):
+    # Réinitialiser l'état quand le PDF est supprimé
+    st.session_state.qa_chain = None
+    st.session_state.pdf_images = None
+    st.rerun()  # Forcer le rafraîchissement de l'UI
+
 if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
@@ -224,12 +230,12 @@ if uploaded_file:
                 st.error(f"Erreur de traitement : {str(e)}")
 
 # Affichage du PDF
-if st.session_state.pdf_images:
+if st.session_state.pdf_images and uploaded_file:  # Ajout de la condition uploaded_file
     with st.container(border=True):
         st.subheader("📄 Aperçu du Document")
         
-        # Navigation entre pages
-        cols = st.columns([1, 4, 1])
+        # Centrage de la navigation
+        cols = st.columns([1, 2, 1])  # Colonnes pour centrage
         with cols[1]:
             page_number = st.number_input(
                 "Page", 
@@ -239,9 +245,9 @@ if st.session_state.pdf_images:
                 label_visibility="collapsed"
             )
         
-        # Affichage de la page
-        col1, col2 = st.columns(2)
-        with col1:
+        # Centrage de l'image
+        col1, col2, col3 = st.columns([1, 3, 1])  # Ratio pour centrage
+        with col2:
             st.image(
                 st.session_state.pdf_images[page_number-1],
                 use_container_width=True,
