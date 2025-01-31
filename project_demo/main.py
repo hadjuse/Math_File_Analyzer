@@ -22,7 +22,7 @@ import re
 from langchain.chains import LLMChain
 from langchain.prompts import PipelinePromptTemplate
 
-# ---------------------- CSS Custom ----------------------
+# Début du CSS personnalisé
 st.markdown("""
 <style>
 /* Style personnalisé pour les équations */
@@ -56,7 +56,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------------- Rendering Functions ----------------------
 def render_markdown_table(content):
     """Render Markdown tables from content."""
     if re.search(r'^(\|.+\|)(\n\|[- :|]+\|)(\n\|.+\|)*$', content.strip(), flags=re.MULTILINE):
@@ -69,7 +68,7 @@ def render_latex(content):
     latex_content = re.sub(r'^\$+|\\[()\[\]]', '', content.strip())
     try:
         st.latex(latex_content)
-    except Exception:
+    except:
         st.code(content)
 
 def render_text(content):
@@ -87,39 +86,32 @@ def render_math(content):
         if render_markdown_table(part):
             continue
         
-        subparts = re.split(
-            r'(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$|\\begin\{.*?\}.*?\\end\{.*?\})', 
-            part, 
-            flags=re.DOTALL
-        )
+        subparts = re.split(r'(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$|\\begin\{.*?\}.*?\\end\{.*?\})', 
+                            part, 
+                            flags=re.DOTALL)
         
         for subpart in subparts:
             if not subpart:
                 continue
             
-            if re.match(
-                r'(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$|\\begin\{.*?\}.*?\\end\{.*?\})', 
-                subpart, 
-                flags=re.DOTALL
-            ):
+            if re.match(r'(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$|\\begin\{.*?\}.*?\\end\{.*?\})', 
+                        subpart, 
+                        flags=re.DOTALL):
                 render_latex(subpart)
             else:
                 render_text(subpart)
 
-# ---------------------- Configuration ----------------------
+# Configuration
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "Math PDF QA with Mistral"
 client = Client()
 MISTRAL_API_KEY = st.secrets["MISTRAL_API_KEY"]
 
-# ---------------------- PDF Processing Functions ----------------------
-@st.cache_data(show_spinner=False)
 def process_pdf_images(pdf_path, max_pages=10, dpi=300):
     """Convert PDF to images and limit to max_pages."""
     images = convert_from_path(pdf_path, dpi=dpi)
     return images[:max_pages]
 
-@st.cache_data(show_spinner=False)
 def process_pdf_text(pdf_path, max_pages=10, chunk_size=1000, chunk_overlap=200):
     """Extract and split text from PDF, limit to max_pages."""
     loader = PyPDFLoader(pdf_path)
@@ -132,17 +124,15 @@ def process_pdf_text(pdf_path, max_pages=10, chunk_size=1000, chunk_overlap=200)
     )
     return text_splitter.split_documents(pages)
 
-@st.cache_data(show_spinner=False)
-def create_vector_store(_texts, model="mistral-embed", persist_directory="./chroma_db"):
+def create_vector_store(texts, model="mistral-embed", persist_directory="./chroma_db"):
     """Create a vector store from texts using MistralAI embeddings."""
     embeddings = MistralAIEmbeddings(model=model, mistral_api_key=MISTRAL_API_KEY)
     return Chroma.from_documents(
-        documents=_texts,
+        documents=texts,
         embedding=embeddings,
         persist_directory=persist_directory
     )
 
-@st.cache_data(show_spinner=False)
 def process_pdf(pdf_path):
     """Process PDF and return both text content and rendered images."""
     images = process_pdf_images(pdf_path)
@@ -150,8 +140,6 @@ def process_pdf(pdf_path):
     vector_store = create_vector_store(texts)
     return vector_store, images
 
-# ---------------------- QA Chain Initialization ----------------------
-@st.cache_resource(show_spinner=False)
 def initialize_qa_chain(vector_store):
     llm = ChatMistralAI(
         model="mistral-large-latest",
@@ -226,18 +214,18 @@ def initialize_qa_chain(vector_store):
         return_source_documents=True
     )
 
-# ---------------------- Session State Initialization ----------------------
+# Initialisation de l'état de session
 if 'qa_chain' not in st.session_state:
     st.session_state.update({
         'qa_chain': None,
         'pdf_images': None
     })
 
-# ---------------------- Streamlit Interface ----------------------
+# Interface Streamlit
 st.title("📚 Analyseur de PDF Mathématiques")
 
 # Section Téléchargement PDF
-with st.container():
+with st.container(border=True):
     uploaded_file = st.file_uploader("Télécharger un PDF", type="pdf")
 
 if not uploaded_file and st.session_state.get('pdf_images'):
@@ -262,12 +250,12 @@ if uploaded_file:
                 st.error(f"Erreur de traitement : {str(e)}")
 
 # Affichage du PDF
-if st.session_state.pdf_images and uploaded_file:
-    with st.container():
+if st.session_state.pdf_images and uploaded_file:  # Ajout de la condition uploaded_file
+    with st.container(border=True):
         st.subheader("📄 Aperçu du Document")
         
         # Centrage de la navigation
-        cols = st.columns([1, 2, 1])
+        cols = st.columns([1, 2, 1])  # Colonnes pour centrage
         with cols[1]:
             page_number = st.number_input(
                 "Page", 
@@ -278,7 +266,7 @@ if st.session_state.pdf_images and uploaded_file:
             )
         
         # Centrage de l'image
-        col1, col2, col3 = st.columns([1, 3, 1])
+        col1, col2, col3 = st.columns([1, 3, 1])  # Ratio pour centrage
         with col2:
             st.image(
                 st.session_state.pdf_images[page_number-1],
@@ -287,7 +275,7 @@ if st.session_state.pdf_images and uploaded_file:
             )
 
 # Section Analyse
-with st.container():
+with st.container(border=True):
     st.subheader("🔍 Analyse du Contenu")
     question = st.text_input("Posez votre question ici :", key="question_input")
     
@@ -305,7 +293,7 @@ with st.container():
                         source_page = doc.metadata.get('page', 0) + 1
                         content = doc.page_content
                         
-                        with st.container():
+                        with st.container(border=True):
                             st.markdown(f"**Page {source_page}**")
                             render_math(content)
                 
