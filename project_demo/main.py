@@ -4,7 +4,6 @@ import fitz  # PyMuPDF
 from pdf2image import convert_from_path
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import Chroma
 from langchain_mistralai import MistralAIEmbeddings
 from langchain_mistralai import ChatMistralAI
 from langchain.chains import RetrievalQA
@@ -17,6 +16,7 @@ import chromadb
 importlib.import_module('pysqlite3')
 import sys
 sys.modules['sqlite3'] = __import__('pysqlite3')
+from langchain_community.vectorstores import Chroma
 # Début du CSS personnalisé
 st.markdown("""
 <style>
