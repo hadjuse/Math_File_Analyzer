@@ -96,12 +96,12 @@ def render_text(content: str):
     if content.strip():
         st.markdown(content.strip())
 
-def render_math(content: str):
+def _render_math_no_bold(content: str):
     """
-    Extrait et affiche les blocs LaTeX du texte en les convertissant en images via QuickLaTeX.
-    Les formats reconnus comprennent les environnements, le display/inline math, et
-    les blocs entre crochets contenant une commande ou '='.
+    Fonction auxiliaire qui recherche et rend les blocs LaTeX dans un segment de texte
+    qui ne contient PAS de balises Markdown en gras.
     """
+    # Définition du pattern pour repérer les formules LaTeX
     pattern = (
         r'(\\begin\{.*?\}.*?\\end\{.*?\})'         # environnements LaTeX
         r'|(\$\$[\s\S]*?\$\$)'                      # display math avec $$
@@ -110,11 +110,19 @@ def render_math(content: str):
         r'|(\\\([\s\S]*?\\\))'                      # inline math avec \(...\)
         r'|(\[\s*(?=.*(?:\\[a-zA-Z]+|=)).*?\s*\])'    # blocs entre crochets contenant commande ou '='
     )
-    matches = regex.findall(pattern, content, regex.DOTALL)
-
-    for groups in matches:
-        code = next((grp for grp in groups if grp), "")
-        code = code.replace('\n', ' ').strip()
+    
+    last_index = 0
+    # Utilisation de finditer pour récupérer les occurences dans l'ordre
+    for match in regex.finditer(pattern, content, regex.DOTALL):
+        start, end = match.span()
+        # Affiche la partie de texte située avant la formule trouvée
+        text_before = content[last_index:start]
+        if text_before.strip():
+            st.markdown(text_before)
+        
+        # Récupération du bloc de formule
+        code = match.group()
+        # Retrait des délimiteurs pour obtenir le code LaTeX pur
         if code.startswith('$$') and code.endswith('$$'):
             code = code[2:-2].strip()
         elif code.startswith('$') and code.endswith('$'):
@@ -125,6 +133,8 @@ def render_math(content: str):
             code = code[2:-2].strip()
         elif code.startswith('[') and code.endswith(']'):
             code = code[1:-1].strip()
+        
+        # Tentative de conversion en image via QuickLaTeX
         img_url = get_quicklatex_image_url(code)
         if img_url:
             st.markdown(f"![formule]({img_url})")
@@ -133,9 +143,37 @@ def render_math(content: str):
                 st.latex(code)
             except Exception:
                 st.code(f"LaTeX non rendu : {code}", language='latex')
-    remaining = regex.sub(pattern, '', content)
-    if remaining.strip():
-        st.markdown(remaining)
+        
+        last_index = end
+    
+    # Affiche le reste du texte après la dernière formule (s'il y en a)
+    if last_index < len(content):
+        remaining = content[last_index:]
+        if remaining.strip():
+            st.markdown(remaining)
+
+
+def render_math(content: str):
+    """
+    Affiche le contenu en rendant les blocs LaTeX dans leur ordre d'apparition,
+    tout en préservant les segments déjà mis en forme en **gras**.
+    
+    Pour ce faire, le texte est d'abord découpé sur les balises Markdown en gras.
+    Les segments non gras sont traités pour rechercher et afficher les formules LaTeX,
+    tandis que les segments gras sont affichés tels quels.
+    """
+    # Pattern pour détecter les segments en gras (attention : cela suppose que les balises ** ne se chevauchent pas)
+    bold_pattern = r"(\*\*.*?\*\*)"
+    parts = regex.split(bold_pattern, content)
+    
+    for part in parts:
+        # Si le segment commence et se termine par **, il est déjà mis en forme
+        if part.startswith("**") and part.endswith("**"):
+            st.markdown(part)
+        else:
+            _render_math_no_bold(part)
+
+
 
 # --- Traitement du PDF ---
 def process_pdf_images(pdf_path: str, max_pages: int = 15, dpi: int = 300):
