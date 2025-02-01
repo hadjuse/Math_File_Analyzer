@@ -13,6 +13,7 @@ import os
 from sympy import *  # Pour générer du LaTeX depuis des expressions Sympy
 import requests  # Pour interroger l'API QuickLaTeX
 import urllib.parse  # Pour encoder la formule
+import uuid  # Pour générer des IDs uniques
 
 # Configuration de SQLite via pysqlite3
 __import__('pysqlite3')
@@ -110,7 +111,7 @@ def render_math(content: str):
         r'|(\[\s*(?=.*(?:\\[a-zA-Z]+|=)).*?\s*\])'    # blocs entre crochets contenant commande ou '='
     )
     matches = regex.findall(pattern, content, regex.DOTALL)
-    
+
     for groups in matches:
         code = next((grp for grp in groups if grp), "")
         code = code.replace('\n', ' ').strip()
@@ -146,14 +147,14 @@ def process_pdf_text(pdf_path: str, max_pages: int = 15, chunk_size: int = 1000,
     splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     return splitter.split_documents(pages)
 
-def create_vector_store(texts):
+def create_vector_store(texts, session_id: str):
     embeddings = MistralAIEmbeddings(model="mistral-embed", mistral_api_key=st.secrets["MISTRAL_API_KEY"])
-    return Chroma.from_documents(texts, embeddings, persist_directory="./chroma_db")
+    return Chroma.from_documents(texts, embeddings, persist_directory=f"./chroma_db_{session_id}")
 
-def process_pdf(pdf_path: str):
+def process_pdf(pdf_path: str, session_id: str):
     images = process_pdf_images(pdf_path)
     texts = process_pdf_text(pdf_path)
-    vector_store = create_vector_store(texts)
+    vector_store = create_vector_store(texts, session_id)
     return vector_store, images
 
 def get_pdf_page_count(pdf_path: str) -> int:
@@ -198,29 +199,34 @@ def initialize_qa_chain(vector_store):
     )
 
 # --- État de session ---
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []  # Contiendra la conversation complète
-if 'qa_chain' not in st.session_state:
-    st.session_state.qa_chain = None
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())  # Génère un ID de session unique
+
+if 'vector_store' not in st.session_state:
+    st.session_state.vector_store = None  # Stocke le vector store pour cette session
+
 if 'pdf_images' not in st.session_state:
-    st.session_state.pdf_images = []
+    st.session_state.pdf_images = []  # Stocke les images du PDF pour cette session
+
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []  # Stocke l'historique de la conversation
 
 def update_chat_history(role: str, content: str):
     """Met à jour l'historique avec validation des données"""
     if role not in ['user', 'assistant']:
         raise ValueError("Rôle invalide")
-    
+
     if not content or not isinstance(content, str):
         raise ValueError("Contenu invalide")
-    
+
     entry = {
         "role": role,
         "content": content,
         "timestamp": datetime.now().strftime("%H:%M:%S")
     }
-    
+
     st.session_state.chat_history.append(entry)
-    
+
     # Limite l'historique aux 10 derniers messages
     if len(st.session_state.chat_history) > 10:
         st.session_state.chat_history.pop(0)
@@ -231,19 +237,18 @@ def render_chat_history():
         return
 
     st.markdown("### Historique de la Conversation")
-    
+
     for chat in st.session_state.chat_history:
         if not all(key in chat for key in ['role', 'content', 'timestamp']):
             continue
-            
+
         role = chat["role"]
         content = chat["content"]
         timestamp = chat["timestamp"] or "Inconnu"
-        
+
         col1, col2 = st.columns([1, 6] if role == "user" else [6, 1])
-        
+
         with (col2 if role == "user" else col1):
-            # Conteneur simplifié
             st.markdown(f"""
                 <div style="font-weight: 500; margin-bottom: 0.5rem;">
                     {'Vous' if role == 'user' else 'Assistant'}
@@ -259,13 +264,11 @@ def render_chat_history():
             </div>
             """, unsafe_allow_html=True)
 
-            # Rendu détaillé uniquement pour l'assistant dans l'expander
             if role == "user":
                 render_text(content)
             if role == "assistant":
                 with st.expander("", expanded=False):
                     render_math(content)
-
 
 # --- Interface principale ---
 st.title("📚 Assistant d'Analyse Mathématique made by hadjuse")
@@ -281,11 +284,11 @@ if uploaded_file:
     if get_pdf_page_count(tmp_path) > 15:
         st.error("Document trop volumineux. Maximum 15 pages autorisées.")
         st.stop()
-    if not st.session_state.qa_chain:
+    if not st.session_state.vector_store:
         with st.spinner("Analyse du document en cours..."):
             try:
-                vector_store, images = process_pdf(tmp_path)
-                st.session_state.qa_chain = initialize_qa_chain(vector_store)
+                vector_store, images = process_pdf(tmp_path, st.session_state.session_id)
+                st.session_state.vector_store = vector_store
                 st.session_state.pdf_images = images
                 st.session_state.chat_history = []  # Réinitialisation de l'historique
                 st.success("Document prêt pour analyse !")
@@ -309,15 +312,13 @@ if st.session_state.pdf_images and uploaded_file:
 with st.form(key="chat_form"):
     question = st.text_input("Votre question :", key="question_input", placeholder="Entrez votre question ici")
     submit_button = st.form_submit_button("Envoyer")
-    
-    if submit_button and question and st.session_state.qa_chain:
+
+    if submit_button and question and st.session_state.vector_store:
         with st.spinner("Analyse en cours..."):
             update_chat_history("user", question)
-            result = st.session_state.qa_chain.invoke({"query": question})
+            qa_chain = initialize_qa_chain(st.session_state.vector_store)
+            result = qa_chain.invoke({"query": question})
             answer = result["result"]
             update_chat_history("assistant", answer)
-            # Rendu du LaTeX de la réponse via QuickLaTeX
             render_math(answer)
-            # Réaffichage de l'historique complet pour voir la conversation
             render_chat_history()
-
