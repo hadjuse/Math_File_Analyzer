@@ -11,7 +11,8 @@ import re as regex
 from datetime import datetime
 import os
 from sympy import *  # Pour générer du LaTeX depuis des expressions Sympy
-import requests  # Nécessaire pour interroger l'API QuickLaTeX
+import requests  # Pour interroger l'API QuickLaTeX
+import urllib.parse  # Pour encoder la formule
 
 # Configuration de SQLite via pysqlite3
 __import__('pysqlite3')
@@ -62,30 +63,32 @@ body {
 def get_quicklatex_image_url(latex_code: str) -> str:
     """
     Envoie le code LaTeX à QuickLaTeX et renvoie l'URL de l'image générée.
-    
-    Le service QuickLaTeX est interrogé via une requête GET.
+    La formule est encodée pour garantir une transmission correcte.
     """
+    # Encodage de la formule
+    encoded_formula = urllib.parse.quote(latex_code)
     params = {
-        'formula': latex_code,
-        'fsize': 12,
+        'formula': encoded_formula,
+        'fsize': 17,  # Taille de police
         'fcolor': '000000',
         'mode': 0,
         'out': 1,
-        'errors': 1
+        'remhost': 'quicklatex.com',
+        'preamble': r'\usepackage{amsmath,amssymb}'
     }
     try:
-        response = requests.get("http://quicklatex.com/latex3.f", params=params)
-        lines = response.text.split('\n')
-        status = lines[0].strip()
-        if status == '0':
-            image_url = lines[1].strip()
-            return image_url
+        # On utilise HTTP comme dans la documentation de QuickLaTeX
+        response = requests.get("http://quicklatex.com/latex3.f", params=params, timeout=10)
+        if response.status_code == 200:
+            lines = response.text.split('\n')
+            # La première ligne doit être "0" pour indiquer le succès
+            if len(lines) >= 2 and lines[0].strip() == '0':
+                return lines[1].strip()
     except Exception as e:
-        st.error(f"Erreur lors de la génération de l'image LaTeX : {str(e)}")
+        st.error(f"Erreur QuickLaTeX : {str(e)}")
     return None
 
 # --- Fonctions de rendu ---
-
 def render_latex(content: str):
     st.latex(content)
 
@@ -97,33 +100,38 @@ def render_text(content: str):
 def render_math(content: str):
     """
     Détecte et affiche des blocs LaTeX dans le texte en les convertissant en images via QuickLaTeX.
-    
-    La fonction cherche les formats suivants :
-      - $...$ pour le mode inline,
-      - \(...\) pour le mode inline,
-      - \[...\] pour le mode display,
-      - \begin{...}...\end{...} pour les environnements LaTeX,
-      - [ ... ] si le contenu contient une commande LaTeX (ex: \text, \frac, etc.) ou un '='.
+
+    Cette fonction cherche les formats suivants :
+      - Environnements LaTeX (avec \begin{...} ... \end{...})
+      - Display math avec $$...$$ ou \[...\]
+      - Inline math avec $...$ ou \(...\)
+      - Blocs entre crochets [ ... ] s'ils contiennent une commande (ex: \text, \frac, etc.) ou un '='.
       
-    Pour un rendu correct, on retire les délimiteurs superflus avant d'envoyer le code à QuickLaTeX.
+    Pour le rendu, on retire les délimiteurs superflus et on envoie le code à QuickLaTeX.
     """
+    # Regex pour capturer plusieurs formats LaTeX, y compris les blocs entre crochets
     pattern = (
-        r'('
-        r'\$.*?\$'                                # inline math avec $
-        r'|\\\(\s*.*?\s*\\\)'                      # inline math avec \(...\)
-        r'|\\\[\s*.*?\s*\\\]'                      # display math avec \[...\]
-        r'|\\begin\{.*?\}.*?\\end\{.*?\}'           # environnements LaTeX
-        r'|\[\s*(?=.*(?:\\[a-zA-Z]+|=)).*?\s*\]'     # bloc entre crochets contenant une commande ou '='
-        r')'
+        r'(\\begin\{.*?\}.*?\\end\{.*?\})'         # environnements LaTeX
+        r'|(\$\$[\s\S]*?\$\$)'                      # display math avec $$
+        r'|(\\\[[\s\S]*?\\\])'                      # display math avec \[...\]
+        r'|(\$[^\$\\]*(?:\\.[^\$\\]*)*\$)'          # inline math avec $
+        r'|(\\\([\s\S]*?\\\))'                      # inline math avec \(...\)
+        r'|(\[\s*(?=.*(?:\\[a-zA-Z]+|=)).*?\s*\])'    # blocs entre crochets contenant commande ou '='
     )
     
-    # Récupération des blocs LaTeX dans le contenu (y compris sur plusieurs lignes)
-    latex_blocks = regex.findall(pattern, content, regex.DOTALL)
+    # Recherche de tous les blocs LaTeX dans le contenu
+    matches = regex.findall(pattern, content, regex.DOTALL)
     
-    for block in latex_blocks:
-        code = block
-        # Retirer les délimiteurs selon le format détecté
-        if code.startswith('$') and code.endswith('$'):
+    # Chaque match est un tuple dont on choisit le premier groupe non vide
+    for groups in matches:
+        code = next((grp for grp in groups if grp), "")
+        # Supprime les retours à la ligne pour la requête
+        code = code.replace('\n', ' ').strip()
+        
+        # Retirer les délimiteurs si nécessaire
+        if code.startswith('$$') and code.endswith('$$'):
+            code = code[2:-2].strip()
+        elif code.startswith('$') and code.endswith('$'):
             code = code[1:-1].strip()
         elif code.startswith('\\(') and code.endswith('\\)'):
             code = code[2:-2].strip()
@@ -131,20 +139,23 @@ def render_math(content: str):
             code = code[2:-2].strip()
         elif code.startswith('[') and code.endswith(']'):
             code = code[1:-1].strip()
-        # Vous pouvez conserver intact le code pour les environnements \begin... \end...
+        # Pour un environnement \begin{...}\end{...}, on peut le laisser tel quel.
         
         # Obtenir l'URL de l'image via QuickLaTeX
         img_url = get_quicklatex_image_url(code)
         if img_url:
-            st.image(img_url)
+            st.markdown(f"![formule]({img_url})")
         else:
-            # Fallback : afficher le code LaTeX dans un bloc de code
-            st.markdown(f"```latex\n{code}\n```")
+            # Fallback : essayer d'afficher avec st.latex
+            try:
+                st.latex(code)
+            except Exception:
+                st.code(f"LaTeX non rendu : {code}", language='latex')
     
-    # Afficher le reste du texte (sans les blocs LaTeX)
-    text_content = regex.sub(pattern, '', content)
-    if text_content.strip():
-        st.markdown(text_content)
+    # Afficher le texte restant (sans les blocs LaTeX)
+    remaining = regex.sub(pattern, '', content)
+    if remaining.strip():
+        st.markdown(remaining)
 
 # --- Traitement du PDF ---
 def process_pdf_images(pdf_path: str, max_pages: int = 15, dpi: int = 300):
@@ -183,19 +194,11 @@ def initialize_qa_chain(vector_store):
         input_variables=["context", "question"],
         template="""
 [Rôle] Expert mathématique
-[Règles]
-1. Utilisez LaTeX ($...$) pour les équations.
-2. Utilisez des tableaux en Markdown si nécessaire.
-3. Respectez la notation statistique.
-4. Pas de mélange texte/équation sur la même ligne.
-5. Répondez de manière claire et concise.
-6. Indiquez vos sources si nécessaire.
-7. Évitez les réponses trop longues.
-8. Ne donnez pas de réponses triviales.
-9. Répondez de manière professionnelle.
-10. Utilisez des phrases complètes.
-11. Évitez les réponses trop techniques.
-12. Répondez en français.
+[Instructions]
+1. Utilisez LaTeX pour TOUTES les équations.
+2. Structurez la réponse avec du texte explicatif et des équations entre $$.
+3. Évitez le mélange de texte et d'équations sur la même ligne.
+4. Répondez en français.
 [Contexte]
 {context}
 
@@ -308,14 +311,3 @@ with st.form(key="chat_form"):
             render_math(answer)
             render_chat_history()
 
-# --- Exemple d'utilisation de Sympy pour générer et afficher du LaTeX ---
-if st.button("Afficher un exemple Sympy"):
-    x, y = symbols('x y')
-    eq = Eq(x + y, 2)
-    st.markdown("Exemple d'équation générée avec Sympy :")
-    st.latex(latex(eq))
-    content = """
-    Pour calculer la fréquence théorique, nous utilisons la formule :
-    [\text{Fréquence théorique} = \frac{\text{Total de la ligne} \times \text{Total de la colonne}}{\text{Effectif total}}]
-    """
-    render_math(content)
