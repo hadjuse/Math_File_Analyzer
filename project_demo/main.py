@@ -31,10 +31,11 @@ body {
 }
 .chat-message {
     margin: 1em 0;
-    padding: 1.5em;
+    padding: 1em;
     border-radius: 15px;
     animation: slideIn 0.3s ease-out;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    max-width: 80%;
 }
 .user-message {
     background: #e3f2fd;
@@ -48,9 +49,10 @@ body {
     border: 1px solid #e0e0e0;
 }
 .timestamp {
-    font-size: 0.75em;
+    font-size: 0.7em;
     color: #666;
-    margin-top: 0.8em;
+    text-align: right;
+    margin-top: 0.5em;
 }
 @keyframes slideIn {
     from { transform: translateY(20px); opacity: 0; }
@@ -65,11 +67,10 @@ def get_quicklatex_image_url(latex_code: str) -> str:
     Envoie le code LaTeX à QuickLaTeX et renvoie l'URL de l'image générée.
     La formule est encodée pour garantir une transmission correcte.
     """
-    # Encodage de la formule
     encoded_formula = urllib.parse.quote(latex_code)
     params = {
         'formula': encoded_formula,
-        'fsize': 17,  # Taille de police
+        'fsize': 17,
         'fcolor': '000000',
         'mode': 0,
         'out': 1,
@@ -77,11 +78,9 @@ def get_quicklatex_image_url(latex_code: str) -> str:
         'preamble': r'\usepackage{amsmath,amssymb}'
     }
     try:
-        # On utilise HTTP comme dans la documentation de QuickLaTeX
         response = requests.get("http://quicklatex.com/latex3.f", params=params, timeout=10)
         if response.status_code == 200:
             lines = response.text.split('\n')
-            # La première ligne doit être "0" pour indiquer le succès
             if len(lines) >= 2 and lines[0].strip() == '0':
                 return lines[1].strip()
     except Exception as e:
@@ -93,23 +92,15 @@ def render_latex(content: str):
     st.latex(content)
 
 def render_text(content: str):
-    text_stripped = content.strip()
-    if text_stripped:
-        st.markdown(text_stripped)
+    if content.strip():
+        st.markdown(content.strip())
 
 def render_math(content: str):
     """
-    Détecte et affiche des blocs LaTeX dans le texte en les convertissant en images via QuickLaTeX.
-
-    Cette fonction cherche les formats suivants :
-      - Environnements LaTeX (avec \begin{...} ... \end{...})
-      - Display math avec $$...$$ ou \[...\]
-      - Inline math avec $...$ ou \(...\)
-      - Blocs entre crochets [ ... ] s'ils contiennent une commande (ex: \text, \frac, etc.) ou un '='.
-      
-    Pour le rendu, on retire les délimiteurs superflus et on envoie le code à QuickLaTeX.
+    Extrait et affiche les blocs LaTeX du texte en les convertissant en images via QuickLaTeX.
+    Les formats reconnus comprennent les environnements, le display/inline math, et
+    les blocs entre crochets contenant une commande ou '='.
     """
-    # Regex pour capturer plusieurs formats LaTeX, y compris les blocs entre crochets
     pattern = (
         r'(\\begin\{.*?\}.*?\\end\{.*?\})'         # environnements LaTeX
         r'|(\$\$[\s\S]*?\$\$)'                      # display math avec $$
@@ -118,17 +109,11 @@ def render_math(content: str):
         r'|(\\\([\s\S]*?\\\))'                      # inline math avec \(...\)
         r'|(\[\s*(?=.*(?:\\[a-zA-Z]+|=)).*?\s*\])'    # blocs entre crochets contenant commande ou '='
     )
-    
-    # Recherche de tous les blocs LaTeX dans le contenu
     matches = regex.findall(pattern, content, regex.DOTALL)
     
-    # Chaque match est un tuple dont on choisit le premier groupe non vide
     for groups in matches:
         code = next((grp for grp in groups if grp), "")
-        # Supprime les retours à la ligne pour la requête
         code = code.replace('\n', ' ').strip()
-        
-        # Retirer les délimiteurs si nécessaire
         if code.startswith('$$') and code.endswith('$$'):
             code = code[2:-2].strip()
         elif code.startswith('$') and code.endswith('$'):
@@ -139,28 +124,21 @@ def render_math(content: str):
             code = code[2:-2].strip()
         elif code.startswith('[') and code.endswith(']'):
             code = code[1:-1].strip()
-        # Pour un environnement \begin{...}\end{...}, on peut le laisser tel quel.
-        
-        # Obtenir l'URL de l'image via QuickLaTeX
         img_url = get_quicklatex_image_url(code)
         if img_url:
             st.markdown(f"![formule]({img_url})")
         else:
-            # Fallback : essayer d'afficher avec st.latex
             try:
                 st.latex(code)
             except Exception:
                 st.code(f"LaTeX non rendu : {code}", language='latex')
-    
-    # Afficher le texte restant (sans les blocs LaTeX)
     remaining = regex.sub(pattern, '', content)
     if remaining.strip():
         st.markdown(remaining)
 
 # --- Traitement du PDF ---
 def process_pdf_images(pdf_path: str, max_pages: int = 15, dpi: int = 300):
-    images = convert_from_path(pdf_path, dpi=dpi)
-    return images[:max_pages]
+    return convert_from_path(pdf_path, dpi=dpi)[:max_pages]
 
 def process_pdf_text(pdf_path: str, max_pages: int = 15, chunk_size: int = 1000, chunk_overlap: int = 200):
     loader = PyPDFLoader(pdf_path)
@@ -179,17 +157,15 @@ def process_pdf(pdf_path: str):
     return vector_store, images
 
 def get_pdf_page_count(pdf_path: str) -> int:
-    doc = fitz.open(pdf_path)
-    return doc.page_count
+    return fitz.open(pdf_path).page_count
 
 # --- Chaîne QA ---
 def initialize_qa_chain(vector_store):
     llm = ChatMistralAI(
         model="mistral-large-latest",
         mistral_api_key=st.secrets["MISTRAL_API_KEY"],
-        temperature=0
+        temperature=0.2
     )
-
     prompt = PromptTemplate(
         input_variables=["context", "question"],
         template="""
@@ -199,6 +175,11 @@ def initialize_qa_chain(vector_store):
 2. Structurez la réponse avec du texte explicatif et des équations entre $$.
 3. Évitez le mélange de texte et d'équations sur la même ligne.
 4. Répondez en français.
+5. Soyez précis et concis.
+6. Expliquez les étapes de calcul si nécessaire.
+7. Utilisez des phrases complètes et correctement ponctuées.
+8. N'hésitez pas à donner des exemples pour illustrer vos propos.
+9. Expliquez les notations et les concepts si nécessaire.
 [Contexte]
 {context}
 
@@ -208,7 +189,6 @@ def initialize_qa_chain(vector_store):
 [Réponse]
 """
     )
-
     return RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
@@ -219,33 +199,76 @@ def initialize_qa_chain(vector_store):
 
 # --- État de session ---
 if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+    st.session_state.chat_history = []  # Contiendra la conversation complète
 if 'qa_chain' not in st.session_state:
     st.session_state.qa_chain = None
 if 'pdf_images' not in st.session_state:
     st.session_state.pdf_images = []
 
 def update_chat_history(role: str, content: str):
+    """Met à jour l'historique avec validation des données"""
+    if role not in ['user', 'assistant']:
+        raise ValueError("Rôle invalide")
+    
+    if not content or not isinstance(content, str):
+        raise ValueError("Contenu invalide")
+    
     entry = {
         "role": role,
         "content": content,
         "timestamp": datetime.now().strftime("%H:%M:%S")
     }
+    
     st.session_state.chat_history.append(entry)
+    
+    # Limite l'historique aux 10 derniers messages
     if len(st.session_state.chat_history) > 10:
         st.session_state.chat_history.pop(0)
 
-def display_chat_message(role: str, content: str, timestamp: str):
-    css_class = "user-message" if role == "user" else "assistant-message"
-    st.markdown(f"""
-    <div class="chat-message {css_class}">
-        <div>{content}</div>
-        <div class="timestamp">{timestamp}</div>
-    </div>
-    """, unsafe_allow_html=True)
+def render_chat_history():
+    """Affiche l'historique de conversation avec le rendu détaillé uniquement dans l'expander"""
+    if not st.session_state.chat_history:
+        return
+
+    st.markdown("### Historique de la Conversation")
+    
+    for chat in st.session_state.chat_history:
+        if not all(key in chat for key in ['role', 'content', 'timestamp']):
+            continue
+            
+        role = chat["role"]
+        content = chat["content"]
+        timestamp = chat["timestamp"] or "Inconnu"
+        
+        col1, col2 = st.columns([1, 6] if role == "user" else [6, 1])
+        
+        with (col2 if role == "user" else col1):
+            # Conteneur simplifié
+            st.markdown(f"""
+                <div style="font-weight: 500; margin-bottom: 0.5rem;">
+                    {'Vous' if role == 'user' else 'Assistant'}
+                    <span style="
+                        font-size: 0.75rem;
+                        color: #666;
+                        margin-left: 1rem;
+                    ">
+                        {timestamp}
+                    </span>
+                </div>
+                {"Voir la réponse détaillée" if role == "assistant" else ""}
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Rendu détaillé uniquement pour l'assistant dans l'expander
+            if role == "user":
+                render_text(content)
+            if role == "assistant":
+                with st.expander("", expanded=False):
+                    render_math(content)
+
 
 # --- Interface principale ---
-st.title("📚 Assistant d'Analyse Mathématique")
+st.title("📚 Assistant d'Analyse Mathématique made by hadjuse")
 
 # 1. Chargement du PDF
 with st.container():
@@ -255,11 +278,9 @@ if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_path = tmp_file.name
-
     if get_pdf_page_count(tmp_path) > 15:
         st.error("Document trop volumineux. Maximum 15 pages autorisées.")
         st.stop()
-
     if not st.session_state.qa_chain:
         with st.spinner("Analyse du document en cours..."):
             try:
@@ -284,19 +305,7 @@ if st.session_state.pdf_images and uploaded_file:
         )
         st.image(st.session_state.pdf_images[page_number - 1], use_container_width=True, caption=f"Page {page_number}")
 
-# 3. Affichage dynamique de l'historique de la conversation
-chat_container = st.empty()
-
-def render_chat_history():
-    with chat_container.container():
-        st.subheader("🗨️ Historique de la Conversation")
-        for chat in st.session_state.chat_history:
-            display_chat_message(chat["role"], chat["content"], chat["timestamp"])
-
-if st.session_state.chat_history:
-    render_chat_history()
-
-# 4. Zone pour poser une nouvelle question via un formulaire
+# 3. Zone de chat interactive
 with st.form(key="chat_form"):
     question = st.text_input("Votre question :", key="question_input", placeholder="Entrez votre question ici")
     submit_button = st.form_submit_button("Envoyer")
@@ -307,7 +316,8 @@ with st.form(key="chat_form"):
             result = st.session_state.qa_chain.invoke({"query": question})
             answer = result["result"]
             update_chat_history("assistant", answer)
-            # Rendu du LaTeX de la réponse sous forme d'image via QuickLaTeX :
+            # Rendu du LaTeX de la réponse via QuickLaTeX
             render_math(answer)
+            # Réaffichage de l'historique complet pour voir la conversation
             render_chat_history()
 
