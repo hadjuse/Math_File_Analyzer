@@ -29,6 +29,7 @@ st.markdown("""
 <style>
 body {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 16px !important;
 }
 .chat-message {
     margin: 1em 0;
@@ -55,6 +56,10 @@ body {
     text-align: right;
     margin-top: 0.5em;
 }
+img {
+    vertical-align: middle; /* Alignement avec le texte */
+    max-width: min(100%, 600px); /* Limite la largeur maximale */
+}
 @keyframes slideIn {
     from { transform: translateY(20px); opacity: 0; }
     to   { transform: translateY(0); opacity: 1; }
@@ -63,15 +68,16 @@ body {
 """, unsafe_allow_html=True)
 
 # --- Fonction pour obtenir l'URL d'une image LaTeX via QuickLaTeX ---
-def get_quicklatex_image_url(latex_code: str) -> str:
+def get_quicklatex_image_url(latex_code: str, is_inline: bool = False) -> str:
     """
     Envoie le code LaTeX à QuickLaTeX et renvoie l'URL de l'image générée.
     La formule est encodée pour garantir une transmission correcte.
     """
+    fsize = 14 if is_inline else 18  # Taille plus adaptée au contexte
     encoded_formula = urllib.parse.quote(latex_code)
     params = {
         'formula': encoded_formula,
-        'fsize': 17,
+        'fsize': fsize,  # Taille dynamique
         'fcolor': '000000',
         'mode': 0,
         'out': 1,
@@ -122,6 +128,13 @@ def _render_math_no_bold(content: str):
         
         # Récupération du bloc de formule
         code = match.group()
+        # Détection du type de formule
+        is_inline = False
+        if code.startswith('$') and code.endswith('$') and not code.startswith('$$'):
+            is_inline = True
+        elif code.startswith('\\('):
+            is_inline = True
+        
         # Retrait des délimiteurs pour obtenir le code LaTeX pur
         if code.startswith('$$') and code.endswith('$$'):
             code = code[2:-2].strip()
@@ -135,9 +148,13 @@ def _render_math_no_bold(content: str):
             code = code[1:-1].strip()
         
         # Tentative de conversion en image via QuickLaTeX
-        img_url = get_quicklatex_image_url(code)
+        img_url = get_quicklatex_image_url(code, is_inline)
         if img_url:
-            st.markdown(f"![formule]({img_url})")
+            st.markdown(
+                f'<img src="{img_url}" style="display: block; height: auto; margin: 0.5em 0;'
+                'max-width: 100%; image-rendering: crisp-edges;">', 
+                unsafe_allow_html=True
+            )
         else:
             try:
                 st.latex(code)
@@ -152,15 +169,10 @@ def _render_math_no_bold(content: str):
         if remaining.strip():
             st.markdown(remaining)
 
-
 def render_math(content: str):
     """
     Affiche le contenu en rendant les blocs LaTeX dans leur ordre d'apparition,
     tout en préservant les segments déjà mis en forme en **gras**.
-    
-    Pour ce faire, le texte est d'abord découpé sur les balises Markdown en gras.
-    Les segments non gras sont traités pour rechercher et afficher les formules LaTeX,
-    tandis que les segments gras sont affichés tels quels.
     """
     # Pattern pour détecter les segments en gras (attention : cela suppose que les balises ** ne se chevauchent pas)
     bold_pattern = r"(\*\*.*?\*\*)"
@@ -172,8 +184,6 @@ def render_math(content: str):
             st.markdown(part)
         else:
             _render_math_no_bold(part)
-
-
 
 # --- Traitement du PDF ---
 def process_pdf_images(pdf_path: str, max_pages: int = 15, dpi: int = 300):
@@ -201,7 +211,7 @@ def get_pdf_page_count(pdf_path: str) -> int:
 # --- Chaîne QA ---
 def initialize_qa_chain(vector_store):
     llm = ChatMistralAI(
-        model="mistral-large-latest",
+        model="mistral-small-latest",
         mistral_api_key=st.secrets["MISTRAL_API_KEY"],
         temperature=0.2
     )
