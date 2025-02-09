@@ -52,4 +52,4 @@ Contributions are welcome! Please fork the repository and create a pull request.
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Contact
-For any questions or suggestions, please open an issue or contact the project maintainer at [your-email@example.com](mailto:your-email@example.com).
+For any questions or suggestions, please open an issue or contact the project maintainer at [rabearimananahadjpro@gmail.com](mailto:rabearimananahadjpro@gmail.com).
